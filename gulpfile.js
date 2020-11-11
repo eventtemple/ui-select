@@ -2,9 +2,8 @@ var fs = require('fs');
 var del = require('del');
 var gulp = require('gulp');
 var streamqueue = require('streamqueue');
-var karma = require('karma').server;
+var karma = require('karma').Server;
 var $ = require('gulp-load-plugins')();
-var runSequence = require('run-sequence');
 var conventionalRecommendedBump = require('conventional-recommended-bump');
 var titleCase = require('title-case');
 
@@ -19,20 +18,11 @@ var config = {
       ' */\n\n\n'
 };
 
-gulp.task('default', ['build','test']);
-gulp.task('build', ['scripts', 'styles']);
-gulp.task('test', ['build', 'karma']);
-
-gulp.task('watch', ['build','karma-watch'], function() {
-  gulp.watch(['src/**/*.{js,html}'], ['build']);
+gulp.task('clean', function() {
+  return del(['dist', 'temp']);
 });
 
-gulp.task('clean', function(cb) {
-  del(['dist', 'temp'], cb);
-});
-
-gulp.task('scripts', ['clean'], function() {
-
+gulp.task('scripts', function() {
   var buildTemplates = function () {
     return gulp.src('src/**/*.html')
       .pipe($.minifyHtml({
@@ -40,7 +30,12 @@ gulp.task('scripts', ['clean'], function() {
              spare: true,
              quotes: true
             }))
-      .pipe($.angularTemplatecache({module: 'ui.select'}));
+      .pipe($.angularTemplatecache({
+        module: 'ui.select',
+        transformUrl: function(url) {
+	         return url.substring(1);
+         }
+       }));
   };
 
   var buildLib = function(){
@@ -71,11 +66,9 @@ gulp.task('scripts', ['clean'], function() {
     .pipe($.concat('select.min.js'))
     .pipe($.sourcemaps.write('./'))
     .pipe(gulp.dest('dist'));
-
 });
 
-gulp.task('styles', ['clean'], function() {
-
+gulp.task('styles', function() {
   return gulp.src(['src/common.css'], {base: 'src'})
     .pipe($.sourcemaps.init())
     .pipe($.header(config.banner, {
@@ -90,25 +83,28 @@ gulp.task('styles', ['clean'], function() {
 
 });
 
-gulp.task('karma', ['build'], function() {
-  karma.start({configFile : __dirname +'/karma.conf.js', singleRun: true});
+gulp.task('build', gulp.series('clean', gulp.parallel('scripts', 'styles')));
+
+gulp.task('karma', function(done) {
+  new karma({
+    configFile: __dirname + '/karma.conf.js',
+    singleRun: true
+  }, done).start();
 });
 
-gulp.task('karma-watch', ['build'], function() {
-  karma.start({configFile :  __dirname +'/karma.conf.js', singleRun: false});
+gulp.task('karma-watch', function() {
+  return karma.start({configFile :  __dirname +'/karma.conf.js', singleRun: false});
 });
 
-gulp.task('pull', function(done) {
-  $.git.pull();
-  done();
+gulp.task('pull', function() {
+  return $.git.pull();
 });
 
-gulp.task('add', function(done) {
-  $.git.add();
-  done();
+gulp.task('add', function() {
+  return $.git.add();
 });
 
-gulp.task('recommendedBump', function(done) {
+gulp.task('recommendedBump', function() {
   /**
    * Bumping version number and tagging the repository with it.
    * Please read http://semver.org/
@@ -117,26 +113,22 @@ gulp.task('recommendedBump', function(done) {
    * introduced a feature or made a backwards-incompatible release.
    */
 
-  conventionalRecommendedBump({preset: 'angular'}, function(err, importance) {
+  return conventionalRecommendedBump({preset: 'angular'}, function(err, importance) {
     // Get all the files to bump version in
-    gulp.src(['./package.json'])
+    return gulp.src(['./package.json'])
       .pipe($.bump({type: importance}))
       .pipe(gulp.dest('./'));
-
-    done();
   });
 });
 
 gulp.task('changelog', function() {
-
   return gulp.src('CHANGELOG.md', {buffer: false})
     .pipe($.conventionalChangelog({preset: 'angular'}))
     .pipe(gulp.dest('./'));
 });
 
-gulp.task('push', function(done) {
-  $.git.push('origin', 'master', {args: '--follow-tags'});
-  done();
+gulp.task('push', function() {
+  return $.git.push('origin', 'master', {args: '--follow-tags'});
 });
 
 gulp.task('commit', function() {
@@ -152,16 +144,10 @@ gulp.task('tag', function() {
     .pipe($.tagVersion());
 });
 
-gulp.task('bump', function(done) {
-  runSequence('recommendedBump', 'changelog', 'add', 'commit', 'tag', 'push', done);
-});
+gulp.task('bump', gulp.series('recommendedBump', 'changelog', 'add', 'commit', 'tag', 'push'));
 
-gulp.task('docs', function (cb) {
-  runSequence('docs:clean', 'docs:examples', 'docs:assets', 'docs:index', cb);
-});
-
-gulp.task('docs:clean', function (cb) {
-  del(['docs-built'], cb)
+gulp.task('docs:clean', function () {
+  return del(['docs-built'])
 });
 
 gulp.task('docs:assets', function () {
@@ -191,9 +177,19 @@ gulp.task('docs:index', function () {
     .pipe(gulp.dest('./docs-built/'));
 });
 
-gulp.task('docs:watch', ['docs'], function() {
-  gulp.watch(['docs/**/*.{js,html}'], ['docs']);
-});
+gulp.task('docs', gulp.series('docs:clean', 'docs:examples', 'docs:assets', 'docs:index'));
+
+gulp.task('docs:watch', gulp.series('docs', function() {
+  return gulp.watch(['docs/**/*.{js,html}'], ['docs']);
+}));
+
+gulp.task('test', gulp.series('build', 'karma'));
+
+gulp.task('default', gulp.series('build', 'karma'));
+
+gulp.task('watch', gulp.series('build','karma-watch', function() {
+  return gulp.watch(['src/**/*.{js,html}'], gulp.series('build'));
+}));
 
 var handleError = function (err) {
   console.log(err.toString());
